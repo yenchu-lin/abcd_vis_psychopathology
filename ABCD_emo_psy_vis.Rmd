@@ -1,0 +1,1381 @@
+---
+title: "visual_emotion_processing_psychopathology"
+output: html_document
+date: "2025-11-25"
+---
+
+# Main steps
+ - part 1 - general setup
+ - part 2 - dissimilarity and total problem score
+ - part 3 - dissimilarity and performance
+ - part 4 - effect sizes
+ - part 5 - performance and total problem score
+ - part 6 - demographic table
+ - part 7 - mediation
+ 
+note: Pearson correlations calculated by python RSAtoolbox package
+
+author: Yen-Chu Lin
+
+# part 1 - general setup
+- (1) load packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(sjPlot)
+require(MuMIn)
+library(effsize) # for cohen.d
+library(tableone)
+library(vtable)
+library(summarytools)
+```
+
+- (2) functions
+```{r}
+select_condition_and_combine_dataframes_v1 <- function(
+    r_visual, r_limbic, r_dorsal, r_ventral, r_frontal, r_default, r_somatic, r_v1, col_name){
+  # the function subsets dataframe based on condition selected & combine all dataframes including v1
+  # also see select_conditions & combine_networks
+  
+  # subset data based on col_name
+  rvis <- r_visual[c("src_subject_id",col_name)]
+  rlim <- r_limbic[c("src_subject_id",col_name)]
+  rdor <- r_dorsal[c("src_subject_id",col_name)]
+  rven <- r_ventral[c("src_subject_id",col_name)]
+  rfro <- r_frontal[c("src_subject_id",col_name)]
+  rdef <- r_default[c("src_subject_id",col_name)]
+  rsom <- r_somatic[c("src_subject_id",col_name)]
+  rv1  <- r_v1[c("src_subject_id",col_name)]
+  
+  colnames(rvis)[2] <- "vis"
+  colnames(rlim)[2] <- "lim"
+  colnames(rdor)[2] <- "dor"
+  colnames(rven)[2] <- "ven"
+  colnames(rfro)[2] <- "fro"
+  colnames(rdef)[2] <- "def"
+  colnames(rsom)[2] <- "som"
+  colnames(rv1)[2]  <- "v1"
+
+  # combine all 7 networks & v1 into one dataframe
+  data <- merge(rvis, rlim, by="src_subject_id")
+  data <- merge(data, rdor, by="src_subject_id")
+  data <- merge(data, rven, by="src_subject_id")
+  data <- merge(data, rfro, by="src_subject_id")
+  data <- merge(data, rdef, by="src_subject_id")
+  data <- merge(data, rsom, by="src_subject_id")
+  data <- merge(data, rv1,  by="src_subject_id")
+  
+  # return data
+  return(data)
+}
+
+func_merge_df <- function(data_r, fam_site_id, nback) {
+  # merge with family ad site ids
+  data_full <- merge(data_r, fam_site_id, by="src_subject_id")
+  # merge with nback
+  data_full <- merge(data_full, nback, by="src_subject_id")
+  
+  return(data_full)
+}
+
+vector_to_factor <- function(data_long) {
+  data_long$src_subject_id <- as.factor(data_long$src_subject_id)
+  data_long$condition      <- as.factor(data_long$condition)
+  data_long$rel_family_id  <- as.factor(data_long$rel_family_id)
+  data_long$site_id_l      <- as.factor(data_long$site_id_l)
+  data_long$network        <- as.factor(data_long$network)
+  return(data_long)
+}
+```
+
+- (3) inputs
+```{r}
+# file path
+r_file_path    <- "/Volumes/FABlab drive 2/Processed data/RSA_Pearson_correlations/"
+abcd_file_path <- "/Volumes/FABlab drive 2/Data/abcd-data-release-4.0/"
+subj_list_path <- "/Volumes/FABlab drive 2/Processed data/"
+
+# dissimilarity (Pearson correlation files)
+file1  <- "visual_pearson_corr.csv"
+file2  <- "limbic_pearson_corr_0back.csv"
+file3  <- "limbic_pearson_corr_2back.csv"
+file4  <- "doratt_pearson_corr_0back.csv"
+file5  <- "doratt_pearson_corr_2back.csv"
+file6  <- "venatt_pearson_corr_0back.csv"
+file7  <- "venatt_pearson_corr_2back.csv"
+file8  <- "sommot_pearson_corr_0back.csv"
+file9  <- "sommot_pearson_corr_2back.csv"
+file10 <- "control_pearson_corr_0back.csv"
+file11 <- "control_pearson_corr_2back.csv"
+file12 <- "default_pearson_corr_0back.csv"
+file13 <- "default_pearson_corr_2back.csv"
+file14 <- "v1_pearson_corr.csv"
+
+# CBCL scores
+cbcl_filename <- "abcd_cbcls01.txt"
+cbcl_col_select <- 
+    c("subjectkey",
+    "cbcl_scr_dsm5_adhd_t","cbcl_scr_dsm5_adhd_r",
+    "cbcl_scr_syn_attention_t","cbcl_scr_syn_attention_r",
+    "cbcl_scr_syn_external_t","cbcl_scr_syn_external_r",
+    "cbcl_scr_syn_internal_t","cbcl_scr_syn_internal_r",
+    "cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r"
+    )
+
+# N-back behavioral data (accuracy)
+naback_behav_filename <- "abcd_mrinback02.txt"
+nback_col_select <- 
+  c("subjectkey",
+    "tfmri_nb_all_beh_c0bpf_rate","tfmri_nb_all_beh_c0bnf_rate","tfmri_nb_all_beh_c0bngf_rate",
+    "tfmri_nb_all_beh_c2bpf_rate","tfmri_nb_all_beh_c2bnf_rate","tfmri_nb_all_beh_c2bngf_rate",
+    "tfmri_nb_all_beh_c0b_rate","tfmri_nb_all_beh_c2b_rate"
+    )
+
+# list of clean subjects
+subj_filename  <- "cleanedsubjectkeys.csv"
+
+# family income, caregiver education, and child race/ethnicity
+pdemo_filename <- "pdem02.txt"
+pdemo_col_select <- 
+    c("subjectkey","demo_prnt_ed_v2","demo_prtnr_ed_v2",
+      "demo_prnt_income_v2", "demo_prtnr_income_v2","demo_comb_income_v2",
+      "demo_race_a_p___10", "demo_race_a_p___11", "demo_race_a_p___12", "demo_race_a_p___13",
+      "demo_race_a_p___14", "demo_race_a_p___15", "demo_race_a_p___16", "demo_race_a_p___17", 
+      "demo_race_a_p___18", "demo_race_a_p___19", "demo_race_a_p___20", "demo_race_a_p___21", 
+      "demo_race_a_p___22", "demo_race_a_p___23", "demo_race_a_p___24", "demo_race_a_p___25", 
+      "demo_race_a_p___77", "demo_race_a_p___99","demo_ethn_v2")
+```
+
+- (4) load files
+```{r}
+# load the dissimilarity files
+r_vis    <- read.csv(paste(r_file_path, file1,  sep=""), header = TRUE)
+r_lim_0b <- read.csv(paste(r_file_path, file2,  sep=""), header = TRUE)
+r_lim_2b <- read.csv(paste(r_file_path, file3,  sep=""), header = TRUE)
+r_dor_0b <- read.csv(paste(r_file_path, file4,  sep=""), header = TRUE)
+r_dor_2b <- read.csv(paste(r_file_path, file5,  sep=""), header = TRUE)
+r_ven_0b <- read.csv(paste(r_file_path, file6,  sep=""), header = TRUE)
+r_ven_2b <- read.csv(paste(r_file_path, file7,  sep=""), header = TRUE)
+r_som_0b <- read.csv(paste(r_file_path, file8,  sep=""), header = TRUE)
+r_som_2b <- read.csv(paste(r_file_path, file9,  sep=""), header = TRUE)
+r_fro_0b <- read.csv(paste(r_file_path, file10, sep=""), header = TRUE)
+r_fro_2b <- read.csv(paste(r_file_path, file11, sep=""), header = TRUE)
+r_def_0b <- read.csv(paste(r_file_path, file12, sep=""), header = TRUE)
+r_def_2b <- read.csv(paste(r_file_path, file13, sep=""), header = TRUE)
+r_v1     <- read.csv(paste(r_file_path, file14, sep=""), header = TRUE)
+r_vis_0b <- r_vis[c("src_subject_id","X0happy0fear","X0happy0neu","X0neu0fear")]
+r_vis_2b <- r_vis[c("src_subject_id","X2happy2fear","X2happy2neu","X2neu2fear")]
+r_v1_0b  <- r_v1[c("src_subject_id","X0happy0fear","X0happy0neu","X0neu0fear")]
+r_v1_2b  <- r_v1[c("src_subject_id","X2happy2fear","X2happy2neu","X2neu2fear")]
+
+# load cbcl
+abcd_cbcl <- read.delim(paste(abcd_file_path, cbcl_filename, sep=""), header = TRUE) %>% filter(eventname == "2_year_follow_up_y_arm_1")
+abcd_cbcl <- abcd_cbcl[cbcl_col_select]
+abcd_cbcl$subjectkey <- gsub("NDAR_", "", abcd_cbcl$subjectkey)
+names(abcd_cbcl)[names(abcd_cbcl) == 'subjectkey'] <- 'src_subject_id'
+
+# load the file with family_id and subset the columns we need 
+acspsw  <- read.delim(paste(abcd_file_path, "acspsw03.txt", sep=""), header = TRUE)  %>% 
+  slice(-1) %>%
+  filter(eventname == "baseline_year_1_arm_1") %>% # only has data from baseline & year 1 
+  subset(select = c("subjectkey", "rel_family_id"))
+
+# load the file with site_id and subset the columns we need
+abcd_site <- read.delim(paste(abcd_file_path, "abcd_lt01.txt", sep=""), header = TRUE) %>% 
+  slice(-1) %>%
+  filter(eventname == "2_year_follow_up_y_arm_1") %>%
+  subset(select = c("subjectkey", "site_id_l","interview_age","sex")) 
+
+# combine family id and site id
+fam_site_id <- merge(acspsw, abcd_site, by = "subjectkey")
+fam_site_id$subjectkey <- gsub("NDAR_", "", fam_site_id$subjectkey)
+names(fam_site_id)[names(fam_site_id) == 'subjectkey'] <- 'src_subject_id'
+
+# load a clean list of subject to use in the neuroimaging analysis
+subj_list <- read.csv(paste(subj_list_path, subj_filename, sep=""), header = FALSE) %>% 
+  slice(-1)
+
+# load N-back behavioral data
+nback <- read.delim(paste(abcd_file_path, naback_behav_filename, sep=""), header = TRUE) %>% filter(eventname == "2_year_follow_up_y_arm_1")
+nback <- nback[nback_col_select] %>% na.omit()
+nback$subjectkey <- gsub("NDAR_", "", nback$subjectkey)
+names(nback)[names(nback) == 'subjectkey'] <- 'src_subject_id'
+
+# load family income and caregiver education data
+abcd_pdem <- read.delim(paste(abcd_file_path, pdemo_filename, sep=""), header = TRUE) %>% 
+  slice(-1) %>%
+  select(all_of(pdemo_col_select))
+abcd_pdem <- abcd_pdem[pdemo_col_select] %>% na.omit()
+abcd_pdem$subjectkey <- gsub("NDAR_", "", abcd_pdem$subjectkey)
+names(abcd_pdem)[names(abcd_pdem) == 'subjectkey'] <- 'src_subject_id'
+```
+
+- (5) preprocess dataframes
+```{r}
+# dissimilarity
+## SUBSETTING DATA BASED ON CONDITION SELECTED
+### 0-back ###
+col_name1 <- "X0happy0fear"
+col_name2 <- "X0happy0neu"
+col_name3 <- "X0neu0fear"
+
+# subset and combine dataframes
+data_hf_0b <- select_condition_and_combine_dataframes_v1(
+  r_vis_0b, r_lim_0b, r_dor_0b, r_ven_0b, r_fro_0b, r_def_0b, r_som_0b, r_v1_0b, col_name1)
+data_hn_0b <- select_condition_and_combine_dataframes_v1(
+  r_vis_0b, r_lim_0b, r_dor_0b, r_ven_0b, r_fro_0b, r_def_0b, r_som_0b, r_v1_0b, col_name2)
+data_fn_0b <- select_condition_and_combine_dataframes_v1(
+  r_vis_0b, r_lim_0b, r_dor_0b, r_ven_0b, r_fro_0b, r_def_0b, r_som_0b, r_v1_0b, col_name3)
+
+### 2-back ###
+col_name4 <- "X2happy2fear"
+col_name5 <- "X2happy2neu"
+col_name6 <- "X2neu2fear"
+
+# subset and combine dataframes
+data_hf_2b <- select_condition_and_combine_dataframes_v1(
+  r_vis_2b, r_lim_2b, r_dor_2b, r_ven_2b, r_fro_2b, r_def_2b, r_som_2b, r_v1_2b, col_name4)
+data_hn_2b <- select_condition_and_combine_dataframes_v1(
+  r_vis_2b, r_lim_2b, r_dor_2b, r_ven_2b, r_fro_2b, r_def_2b, r_som_2b, r_v1_2b, col_name5)
+data_fn_2b <- select_condition_and_combine_dataframes_v1(
+  r_vis_2b, r_lim_2b, r_dor_2b, r_ven_2b, r_fro_2b, r_def_2b, r_som_2b, r_v1_2b, col_name6)
+
+# sanity check
+# exclude subjects with NA for dissimilarity
+# dim(data_hf_0b) # 4952    9
+# dim(data_hf_2b) # 4952    9
+# dim(data_hn_0b) # 4952    9
+# dim(data_hn_2b) # 4952    9
+# dim(data_fn_0b) # 4952    9
+# dim(data_fn_2b) # 4952    9
+
+# check completeness 
+# dim(data_hf_0b[complete.cases(data_hf_0b), ]) # 4952    9
+# dim(data_hf_2b[complete.cases(data_hf_2b), ]) # 4952    9
+# dim(data_hn_0b[complete.cases(data_hn_0b), ]) # 4952    9
+# dim(data_hn_2b[complete.cases(data_hn_2b), ]) # 4952    9
+# dim(data_fn_0b[complete.cases(data_fn_0b), ]) # 4952    9
+# dim(data_fn_2b[complete.cases(data_fn_2b), ]) # 4952    9
+
+# head(data_hf_0b)
+```
+
+# part 2 - dissimilarity and CBCL score 
+- (1) process datasets for dissimilarity and total problems score
+```{r}
+# merge dataframes
+### 0-back ###
+# (1) add a column to specify the condition
+data_hf_0b$condition <- "hf" 
+data_hn_0b$condition <- "hn"
+data_fn_0b$condition <- "fn"
+
+# (2) merge distance with family id and site id
+data_hf0b <- func_merge_df(data_hf_0b, fam_site_id, nback)
+data_hn0b <- func_merge_df(data_hn_0b, fam_site_id, nback)
+data_fn0b <- func_merge_df(data_fn_0b, fam_site_id, nback)
+
+# (3) merge with cbcl
+data_hf0b <- merge(data_hf0b, abcd_cbcl, by="src_subject_id")
+data_hn0b <- merge(data_hn0b, abcd_cbcl, by="src_subject_id")
+data_fn0b <- merge(data_fn0b, abcd_cbcl, by="src_subject_id")
+
+# (4) convert the data into long format
+colname_list <- c("vis","lim","dor","ven","fro","def","som","v1")
+data_hf0b_long <- 
+  pivot_longer(data_hf0b, cols = all_of(colname_list), names_to = "network", values_to = "dis")
+data_hn0b_long <- 
+  pivot_longer(data_hn0b, cols = all_of(colname_list), names_to = "network", values_to = "dis")
+data_fn0b_long <- 
+  pivot_longer(data_fn0b, cols = all_of(colname_list), names_to = "network", values_to = "dis")
+
+# (5) COMBINE ALL THREE CONDITIONS 
+data_0back <- rbind(data_hf0b_long, data_hn0b_long, data_fn0b_long)
+
+# (6) make age and CBCL scores numeric
+data_hf0b_long <- data_hf0b_long %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric) 
+data_hn0b_long <- data_hn0b_long %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric) 
+data_fn0b_long <- data_fn0b_long %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric) 
+data_0back <- data_0back %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric)
+
+### 2-back ###
+# (1) add a column to specify the condition
+data_hf_2b$condition <- "hf" 
+data_hn_2b$condition <- "hn"
+data_fn_2b$condition <- "fn"
+
+# (2) merge distance with family id and site id
+data_hf2b <- func_merge_df(data_hf_2b, fam_site_id, nback)
+data_hn2b <- func_merge_df(data_hn_2b, fam_site_id, nback)
+data_fn2b <- func_merge_df(data_fn_2b, fam_site_id, nback)
+
+# (3) merge with cbcl
+data_hf2b <- merge(data_hf2b, abcd_cbcl, by="src_subject_id")
+data_hn2b <- merge(data_hn2b, abcd_cbcl, by="src_subject_id")
+data_fn2b <- merge(data_fn2b, abcd_cbcl, by="src_subject_id")
+
+# (4) convert the data into long format
+colname_list <- c("vis","lim","dor","ven","fro","def","som","v1")
+data_hf2b_long <- 
+  pivot_longer(data_hf2b, cols = all_of(colname_list), names_to = "network", values_to = "dis")
+data_hn2b_long <- 
+  pivot_longer(data_hn2b, cols = all_of(colname_list), names_to = "network", values_to = "dis")
+data_fn2b_long <- 
+  pivot_longer(data_fn2b, cols = all_of(colname_list), names_to = "network", values_to = "dis")
+
+# (5) COMBINE ALL THREE CONDITIONS 
+data_2back <- rbind(data_hf2b_long, data_hn2b_long, data_fn2b_long)
+
+# (6) make age and CBCL scores numeric
+data_hf2b_long <- data_hf2b_long %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric) 
+data_hn2b_long <- data_hn2b_long %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric) 
+data_fn2b_long <- data_fn2b_long %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric) 
+data_2back <- data_2back %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(nback_col_select[-1], as.numeric)
+```
+
+- (2) mixed model - dis vs. cbcl
+one model per network
+```{r}
+vector_to_factor <- function(data_long) {
+  data_long$src_subject_id <- as.factor(data_long$src_subject_id)
+  data_long$rel_family_id  <- as.factor(data_long$rel_family_id)
+  data_long$site_id_l      <- as.factor(data_long$site_id_l)
+  return(data_long)
+}
+data_0back <- vector_to_factor(data_0back)
+data_2back <- vector_to_factor(data_2back)
+
+### total problem score ### 
+## 0-back ##
+# vis
+lme2_0back_vis_tol <- lmer(cbcl_scr_syn_totprob_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_tol) # 0.940 ; no interactions
+# lim
+lme2_0back_lim_tol <- lmer(cbcl_scr_syn_totprob_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_tol) # 0.487 ; no interactions
+# v1
+lme2_0back_v1_tol <- lmer(cbcl_scr_syn_totprob_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_tol) # 0.0359 * ; no interactions
+
+## 2-back ##
+# vis
+lme2_2back_vis_tol <- lmer(cbcl_scr_syn_totprob_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_tol) # 0.00016 *** ; no interactions
+# lim
+lme2_2back_lim_tol <- lmer(cbcl_scr_syn_totprob_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_tol) # 0.477 ; no interactions
+# v1
+lme2_2back_v1_tol <- lmer(cbcl_scr_syn_totprob_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_tol) # 6.73e-05 *** ; no interactions
+
+### internalization score ### 
+## 0-back ##
+# vis
+lme2_0back_vis_int <- lmer(cbcl_scr_syn_internal_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_int) # 0.0145 * ; no interactions
+# lim
+lme2_0back_lim_int <- lmer(cbcl_scr_syn_internal_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_int) # 0.834 ; no interactions
+# v1
+lme2_0back_v1_int <- lmer(cbcl_scr_syn_internal_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_int) # 0.473 ; no interactions
+
+## 2-back ##
+# vis
+lme2_2back_vis_int <- lmer(cbcl_scr_syn_internal_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_int) # 0.325 ; no interactions
+# lim
+lme2_2back_lim_int <- lmer(cbcl_scr_syn_internal_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_int) # 0.970 ; no interactions
+# v1
+lme2_2back_v1_int <- lmer(cbcl_scr_syn_internal_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_int) # 0.624 ; no interactions
+
+### externalization score ### 
+## 0-back ##
+# vis
+lme2_0back_vis_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_ext) # 0.168 ; no interactions
+# lim
+lme2_0back_lim_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_ext) # 0.265 ; no interactions
+# v1
+lme2_0back_v1_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_ext) # 0.0217 * ; no interactions
+
+## 2-back ##
+# vis
+lme2_2back_vis_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_ext) # 0.001170 ** ; no interactions
+# lim
+lme2_2back_lim_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_ext) # 0.554 ; no interactions
+# v1
+lme2_2back_v1_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_ext) # 1.01e-05 *** ; no interactions
+```
+
+- (3) plot - dissimilarity vs. cbcl
+(3.1) cbcl score distributions
+```{r}
+# preprocess dataset
+cbcl_col_list <- 
+    c(
+      "cbcl_scr_syn_attention_t","cbcl_scr_syn_attention_r",
+      "cbcl_scr_syn_external_t","cbcl_scr_syn_external_r",
+      "cbcl_scr_syn_internal_t","cbcl_scr_syn_internal_r",
+      "cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r"
+    )
+data_cbcl <- data_hf0b %>%
+  mutate_at(cbcl_col_list, as.numeric)
+
+f1_totptob_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_totprob_r)) + 
+  geom_histogram(binwidth=2, color = "black", fill = "white") +
+  scale_y_continuous(expand = c(0,0), limits = c(0,600)) +
+  labs(x = "total problems raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_ext_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_external_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+  scale_y_continuous(expand = c(0,0), limits = c(0,1700)) +
+  labs(x = "externalizing problems raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_int_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_internal_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+  scale_y_continuous(expand = c(0,0), limits = c(0,1000)) +
+  labs(x = "internalizing problems raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_totptob_t <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_totprob_t)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,350)) +
+  labs(x = "total problems t-score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_ext_t <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_external_t)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,1300)) +
+  labs(x = "externalizing problems t-score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_int_t <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_internal_t)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+  scale_x_continuous(expand = c(0,0),limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,600)) +
+  labs(x = "internalizing problems t-score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_totptob_r
+f1_ext_r
+f1_int_r
+f1_totptob_t
+f1_ext_t
+f1_int_t
+
+# sanity check
+# min(data_0back["cbcl_scr_syn_totprob_r"]) # 0
+# max(data_0back["cbcl_scr_syn_totprob_r"]) # 161
+# min(data_0back["cbcl_scr_syn_internal_r"]) # 0
+# max(data_0back["cbcl_scr_syn_internal_r"]) # 50
+# min(data_0back["cbcl_scr_syn_external_r"]) # 0
+# max(data_0back["cbcl_scr_syn_external_r"]) # 50
+# min(data_2back["cbcl_scr_syn_totprob_r"]) # 0
+# max(data_2back["cbcl_scr_syn_totprob_r"]) # 161
+# min(data_2back["cbcl_scr_syn_internal_r"]) # 0
+# max(data_2back["cbcl_scr_syn_internal_r"]) # 50
+# min(data_2back["cbcl_scr_syn_external_r"]) # 0
+# max(data_2back["cbcl_scr_syn_external_r"]) # 50
+
+# min(data_2back["cbcl_scr_syn_totprob_t"]) # 24
+# max(data_2back["cbcl_scr_syn_totprob_t"]) # 88
+# min(data_2back["cbcl_scr_syn_internal_t"]) # 33
+# max(data_2back["cbcl_scr_syn_internal_t"]) # 90
+# min(data_2back["cbcl_scr_syn_external_t"]) # 33
+# max(data_2back["cbcl_scr_syn_external_t"]) # 83
+
+# min(data_0back["dis"]) # 0.00586022
+# max(data_0back["dis"]) # 1.757153
+# min(data_2back["dis"]) # 0.006938755
+# max(data_2back["dis"]) # 1.900827
+
+# head(data_0back)
+```
+
+(3.2) subjects with both ext and int problems (check overlaps)
+```{r}
+# head(data_cbcl)
+sum((data_cbcl$cbcl_scr_syn_external_t>=60) & (data_cbcl$cbcl_scr_syn_internal_t>=60)) # 204
+length(data_cbcl$src_subject_id[(data_cbcl$cbcl_scr_syn_external_t>=60) & (data_cbcl$cbcl_scr_syn_internal_t>=60)]) # 204
+# data_cbcl$src_subject_id[(data_cbcl$cbcl_scr_syn_external_t>=60) & (data_cbcl$cbcl_scr_syn_internal_t>=60)]
+```
+
+(3.3) total problems score plot
+```{r}
+# cbcl_scr_syn_totprob_r
+### 0-back ###
+# vis
+f2_0back_vis_tol <- 
+  ggplot(data_0back[data_0back$network == "vis",], aes(cbcl_scr_syn_totprob_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="total problems score", y="dissimilarities", title="Vis", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-10,180)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# lim
+f2_0back_lim_tol <- 
+  ggplot(data_0back[data_0back$network == "lim",], aes(cbcl_scr_syn_totprob_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="total problems score", y="dissimilarities", title="Lim", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-10,180)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# v1
+f2_0back_v1_tol <- 
+  ggplot(data_0back[data_0back$network == "v1",], aes(cbcl_scr_syn_totprob_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="total problems score", y="dissimilarities", title="V1", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-10,180)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+### 2-back ###
+# vis
+f2_2back_vis_tol <- 
+  ggplot(data_2back[data_2back$network == "vis",], aes(cbcl_scr_syn_totprob_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="total problems score", y="dissimilarities", title="Vis", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-10,180)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# lim
+f2_2back_lim_tol <- 
+  ggplot(data_2back[data_2back$network == "lim",], aes(cbcl_scr_syn_totprob_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="total problems score", y="dissimilarities", title="Lim", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-10,180)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# v1
+f2_2back_v1_tol <- 
+  ggplot(data_2back[data_2back$network == "v1",], aes(cbcl_scr_syn_totprob_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="total problems score", y="dissimilarities", title="V1", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-10,180)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+
+f2_0back_vis_tol
+f2_0back_lim_tol
+f2_0back_v1_tol
+f2_2back_vis_tol
+f2_2back_lim_tol
+f2_2back_v1_tol
+```
+
+(3.4) internalizing score plot
+```{r}
+# cbcl_scr_syn_internal_r
+### 0-back ###
+# vis
+f2_0back_vis_int <- 
+  ggplot(data_0back[data_0back$network == "vis",], aes(cbcl_scr_syn_internal_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="internalizing problems score", y="dissimilarities", title="Vis", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,60)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# lim
+f2_0back_lim_int <- 
+  ggplot(data_0back[data_0back$network == "lim",], aes(cbcl_scr_syn_internal_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="internalizing problems score", y="dissimilarities", title="Lim", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,60)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +  
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# v1
+f2_0back_v1_int <- 
+  ggplot(data_0back[data_0back$network == "v1",], aes(cbcl_scr_syn_internal_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="internalizing problems score", y="dissimilarities", title="V1", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +  
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+### 2-back ###
+# vis
+f2_2back_vis_int <- 
+  ggplot(data_2back[data_2back$network == "vis",], aes(cbcl_scr_syn_internal_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="internalizing problems score", y="dissimilarities", title="Vis", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +  
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# lim
+f2_2back_lim_int <- 
+  ggplot(data_2back[data_2back$network == "lim",], aes(cbcl_scr_syn_internal_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="internalizing problems score", y="dissimilarities", title="Lim", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +  
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# v1
+f2_2back_v1_int <- 
+  ggplot(data_2back[data_2back$network == "v1",], aes(cbcl_scr_syn_internal_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="internalizing problems score", y="dissimilarities", title="V1", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) +  
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+
+f2_0back_vis_int
+f2_0back_lim_int
+f2_0back_v1_int
+f2_2back_vis_int
+f2_2back_lim_int
+f2_2back_v1_int
+```
+
+(3.5) externalizing score plot
+```{r}
+# cbcl_scr_syn_external_r
+### 0-back ###
+# vis
+f2_0back_vis_ext <- 
+  ggplot(data_0back[data_0back$network == "vis",], aes(cbcl_scr_syn_external_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="externalizing problems score", y="dissimilarities", title="Vis", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) + 
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# lim
+f2_0back_lim_ext <- 
+  ggplot(data_0back[data_0back$network == "lim",], aes(cbcl_scr_syn_external_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="externalizing problems score", y="dissimilarities", title="Lim", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) + 
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# v1
+f2_0back_v1_ext <- 
+  ggplot(data_0back[data_0back$network == "v1",], aes(cbcl_scr_syn_external_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="externalizing problems score", y="dissimilarities", title="V1", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) + 
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+### 2-back ###
+# vis
+f2_2back_vis_ext <- 
+  ggplot(data_2back[data_2back$network == "vis",], aes(cbcl_scr_syn_external_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="externalizing problems score", y="dissimilarities", title="Vis", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) + 
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# lim
+f2_2back_lim_ext <- 
+  ggplot(data_2back[data_2back$network == "lim",], aes(cbcl_scr_syn_external_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="externalizing problems score", y="dissimilarities", title="Lim", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) + 
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+# v1
+f2_2back_v1_ext <- 
+  ggplot(data_2back[data_2back$network == "v1",], aes(cbcl_scr_syn_external_r, dis)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(x="externalizing problems score", y="dissimilarities", title="V1", fill="count") +
+  scale_x_continuous(expand = c(0,0), limits = c(-2,55)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-0.1,2.1)) + 
+  theme_classic() +
+  theme(text = element_text(size = 20), 
+        axis.text.x = element_text(size = 18), 
+        axis.text.y = element_text(size = 18))
+
+f2_0back_vis_ext
+f2_0back_lim_ext
+f2_0back_v1_ext
+f2_2back_vis_ext
+f2_2back_lim_ext
+f2_2back_v1_ext
+```
+
+# part 3 - dissimilarity and performance
+- (1) process datasets
+```{r}
+# Calculate the mean accuracy of all faces
+# 0-back
+data_0back <- data_0back %>% 
+  mutate(data_0back, allface_0b_rate = rowMeans(select(data_0back, c("tfmri_nb_all_beh_c0bpf_rate","tfmri_nb_all_beh_c0bnf_rate", "tfmri_nb_all_beh_c0bngf_rate"))))
+
+# 2-back 
+data_2back <- data_2back %>%
+  mutate(data_2back, allface_2b_rate = rowMeans(select(data_2back, c("tfmri_nb_all_beh_c2bpf_rate","tfmri_nb_all_beh_c2bnf_rate","tfmri_nb_all_beh_c2bngf_rate"))))
+
+# head(data_0back)
+# head(data_2back)
+```
+
+- (2) mixed models
+```{r}
+###### controlled for overall performance ######
+## 0-back ##
+# vis #
+lmer3_0back_vis <- lmer(allface_0b_rate ~ dis + tfmri_nb_all_beh_c0b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lmer3_0back_vis) # 0.8330
+
+# lim #
+lmer3_0back_lim <- lmer(allface_0b_rate ~ dis + tfmri_nb_all_beh_c0b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lmer3_0back_lim) # 0.1511
+
+# v1
+lmer3_0back_v1 <- lmer(allface_0b_rate ~ dis + tfmri_nb_all_beh_c0b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lmer3_0back_v1) # 0.391
+
+## 2-back ##
+# vis #
+lmer3_2back_vis <- lmer(allface_2b_rate ~ dis + tfmri_nb_all_beh_c2b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lmer3_2back_vis) # 0.000977 ***
+
+# lim
+lmer3_2back_lim <- lmer(allface_2b_rate ~ dis + tfmri_nb_all_beh_c2b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lmer3_2back_lim) # 0.00492 **
+
+# v1
+lmer3_2back_v1 <- lmer(allface_2b_rate ~ dis + tfmri_nb_all_beh_c2b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lmer3_2back_v1) # 0.0215 *
+```
+
+- (3) plots
+```{r}
+# scatter plot of all three dissimilarity and cbcl scores
+## 0-back
+# vis
+f3_0back_vis <- 
+  ggplot(data_0back[data_0back$network == "vis",], aes(x=dis, y=allface_0b_rate)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(title = "Vis (0-back)",
+       x = "Dissimilarity",
+       y = "Accuracy") +
+  scale_x_continuous(expand = c(0,0), limits = c(0,2)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0.5,1.1)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18))
+# lim
+f3_0back_lim <- 
+  ggplot(data_0back[data_0back$network == "lim",], aes(x=dis, y=allface_0b_rate)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(title = "Lim (0-back)",
+       x = "Dissimilarity",
+       y = "Accuracy") +
+  scale_x_continuous(expand = c(0,0), limits = c(0,2)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0.5,1.1)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18))
+# v1
+f3_0back_v1 <- 
+  ggplot(data_0back[data_0back$network == "v1",], aes(x=dis, y=allface_0b_rate)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(title = "V1 (0-back)",
+       x = "Dissimilarity",
+       y = "Accuracy") +
+  scale_x_continuous(expand = c(0,0), limits = c(0,2)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0.5,1.1)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18))
+
+## 2-back
+# vis
+f3_2back_vis <- 
+  ggplot(data_2back[data_2back$network == "vis",], aes(x=dis, y=allface_2b_rate)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(title = "Vis (2-back)",
+       x = "Dissimilarity",
+       y = "Accuracy") +
+  scale_x_continuous(expand = c(0,0), limits = c(0,2)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0.5,1.1)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18))
+# lim
+f3_2back_lim <- 
+  ggplot(data_2back[data_2back$network == "lim",], aes(x=dis, y=allface_2b_rate)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(title = "Lim (2-back)",
+       x = "Dissimilarity",
+       y = "Accuracy") +
+  scale_x_continuous(expand = c(0,0), limits = c(0,2)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0.5,1.1)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18))
+# v1
+f3_2back_v1 <- 
+  ggplot(data_2back[data_2back$network == "v1",], aes(x=dis, y=allface_2b_rate)) + 
+  geom_hex() + stat_smooth(color="red", fill="red", method=lm, size=0.5, level=0.999) +
+  labs(title = "V1 (2-back)",
+       x = "Dissimilarity",
+       y = "Accuracy") +
+  scale_x_continuous(expand = c(0,0), limits = c(0,2)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0.5,1.1)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18))
+
+f3_0back_vis
+f3_0back_lim
+f3_0back_v1
+f3_2back_vis
+f3_2back_lim
+f3_2back_v1
+```
+
+# part 4 - effect sizes
+- (1) process dataset for effect sizes
+```{r}
+# merge the dataframes
+data_hf_0b_eff <- merge(data_hf_0b, fam_site_id, by="src_subject_id")
+data_hn_0b_eff <- merge(data_hn_0b, fam_site_id, by="src_subject_id")
+data_fn_0b_eff <- merge(data_fn_0b, fam_site_id, by="src_subject_id")
+data_hf_2b_eff <- merge(data_hf_2b, fam_site_id, by="src_subject_id")
+data_hn_2b_eff <- merge(data_hn_2b, fam_site_id, by="src_subject_id")
+data_fn_2b_eff <- merge(data_fn_2b, fam_site_id, by="src_subject_id")
+
+data_hf_0b_eff$nback <- "0_back"
+data_hn_0b_eff$nback <- "0_back"
+data_fn_0b_eff$nback <- "0_back"
+data_hf_2b_eff$nback <- "2_back"
+data_hn_2b_eff$nback <- "2_back"
+data_fn_2b_eff$nback <- "2_back"
+
+data_hf_0b_eff$condition <- "hf"
+data_hn_0b_eff$condition <- "hn"
+data_fn_0b_eff$condition <- "fn"
+data_hf_2b_eff$condition <- "hf"
+data_hn_2b_eff$condition <- "hn"
+data_fn_2b_eff$condition <- "fn"
+
+data_hf_0b_eff$v1 <- NULL
+data_hn_0b_eff$v1 <- NULL
+data_fn_0b_eff$v1 <- NULL
+data_hf_2b_eff$v1 <- NULL
+data_hn_2b_eff$v1 <- NULL
+data_fn_2b_eff$v1 <- NULL
+
+# (6.1) sanity check
+dim(data_hf_0b_eff) # 4952    14
+dim(data_hf_2b_eff) # 4952    14
+dim(data_hn_0b_eff) # 4952    14
+dim(data_hn_2b_eff) # 4952    14
+dim(data_fn_0b_eff) # 4952    14
+dim(data_fn_2b_eff) # 4952    14
+
+# head(data_hf_0b_eff)
+```
+
+- (2) Process dataframe for mixed effect models
+one model for each network - association between 1-r and each network (for example, vis vs. non-vis)
+```{r}
+list_eff <- c("vis","lim","dor","ven","fro","def","som")
+
+### 0-back ###
+# convert the data into long format
+data_hf_0b_long <- pivot_longer(data_hf_0b_eff, cols = all_of(list_eff), names_to = "network", values_to = "dis")
+data_hn_0b_long <- pivot_longer(data_hn_0b_eff, cols = all_of(list_eff), names_to = "network", values_to = "dis")
+data_fn_0b_long <- pivot_longer(data_fn_0b_eff, cols = all_of(list_eff), names_to = "network", values_to = "dis")
+
+# COMBINE ALL THREE CONDITIONS 
+data_0b <- rbind(data_hf_0b_long, data_hn_0b_long, data_fn_0b_long)
+# convert vector objects to factors
+data_0b <- vector_to_factor(data_0b)
+
+# setup the data for mixed effect model
+data_0b$vis <- (data_0b$network == "vis") * 1
+data_0b$lim <- (data_0b$network == "lim") * 1
+data_0b$dor <- (data_0b$network == "dor") * 1
+data_0b$ven <- (data_0b$network == "ven") * 1
+data_0b$fro <- (data_0b$network == "fro") * 1
+data_0b$def <- (data_0b$network == "def") * 1
+data_0b$som <- (data_0b$network == "som") * 1
+
+data_0b$vis <- as.factor(data_0b$vis)
+data_0b$lim <- as.factor(data_0b$lim)
+data_0b$dor <- as.factor(data_0b$dor)
+data_0b$ven <- as.factor(data_0b$ven)
+data_0b$fro <- as.factor(data_0b$fro)
+data_0b$def <- as.factor(data_0b$def)
+data_0b$som <- as.factor(data_0b$som)
+
+### 2-back ###
+# convert the data into long format
+data_hf_2b_long <- pivot_longer(data_hf_2b_eff, cols = all_of(list_eff), names_to = "network", values_to = "dis")
+data_hn_2b_long <- pivot_longer(data_hn_2b_eff, cols = all_of(list_eff), names_to = "network", values_to = "dis")
+data_fn_2b_long <- pivot_longer(data_fn_2b_eff, cols = all_of(list_eff), names_to = "network", values_to = "dis")
+
+# COMBINE ALL THREE CONDITIONS 
+data_2b <- rbind(data_hf_2b_long, data_hn_2b_long, data_fn_2b_long)
+# convert vector objects to factors
+data_2b <- vector_to_factor(data_2b)
+
+# setup the data for mixed effect model
+data_2b$vis <- (data_2b$network == "vis") * 1
+data_2b$lim <- (data_2b$network == "lim") * 1
+data_2b$dor <- (data_2b$network == "dor") * 1
+data_2b$ven <- (data_2b$network == "ven") * 1
+data_2b$fro <- (data_2b$network == "fro") * 1
+data_2b$def <- (data_2b$network == "def") * 1
+data_2b$som <- (data_2b$network == "som") * 1
+
+data_2b$vis <- as.factor(data_2b$vis)
+data_2b$lim <- as.factor(data_2b$lim)
+data_2b$dor <- as.factor(data_2b$dor)
+data_2b$ven <- as.factor(data_2b$ven)
+data_2b$fro <- as.factor(data_2b$fro)
+data_2b$def <- as.factor(data_2b$def)
+data_2b$som <- as.factor(data_2b$som)
+```
+
+- (3) run mixed models
+use R marginal squared as effect sizes of each network
+```{r}
+### 0-back ###
+# run mixed effect model for seven networks separately
+lme1_vis_0b <- lmer(dis ~ vis * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+lme1_lim_0b <- lmer(dis ~ lim * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+lme1_dor_0b <- lmer(dis ~ dor * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+lme1_ven_0b <- lmer(dis ~ ven * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+lme1_fro_0b <- lmer(dis ~ fro * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+lme1_def_0b <- lmer(dis ~ def * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+lme1_som_0b <- lmer(dis ~ som * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_0b)
+
+# get the R squared marginal values
+m <- matrix(ncol = 0, nrow = 0) # create an empty matrix
+r_squared_0back <- data.frame(m) # empty matrix to dataframe
+r_squared_0back <- r.squaredGLMM(lme1_vis_0b) %>% 
+  rbind(r_squared_0back, r.squaredGLMM(lme1_lim_0b)) %>%
+  rbind(r_squared_0back, r.squaredGLMM(lme1_dor_0b)) %>%
+  rbind(r_squared_0back, r.squaredGLMM(lme1_ven_0b)) %>%
+  rbind(r_squared_0back, r.squaredGLMM(lme1_fro_0b)) %>%
+  rbind(r_squared_0back, r.squaredGLMM(lme1_def_0b)) %>%
+  rbind(r_squared_0back, r.squaredGLMM(lme1_som_0b))
+row.names(r_squared_0back) <- list_eff
+
+### 2-back ###
+# run mixed effect model for seven networks separately
+lme1_vis_2b <- lmer(dis ~ vis * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+lme1_lim_2b <- lmer(dis ~ lim * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+lme1_dor_2b <- lmer(dis ~ dor * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+lme1_ven_2b <- lmer(dis ~ ven * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+lme1_fro_2b <- lmer(dis ~ fro * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+lme1_def_2b <- lmer(dis ~ def * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+lme1_som_2b <- lmer(dis ~ som * condition + (1|src_subject_id) + (1|site_id_l/rel_family_id), data = data_2b)
+
+# get the R squared marginal values
+m <- matrix(ncol = 0, nrow = 0) # create an empty matrix
+r_squared_2back <- data.frame(m) # empty matrix to dataframe
+r_squared_2back <- r.squaredGLMM(lme1_vis_2b) %>% 
+  rbind(r_squared_2back, r.squaredGLMM(lme1_lim_2b)) %>%
+  rbind(r_squared_2back, r.squaredGLMM(lme1_dor_2b)) %>%
+  rbind(r_squared_2back, r.squaredGLMM(lme1_ven_2b)) %>%
+  rbind(r_squared_2back, r.squaredGLMM(lme1_fro_2b)) %>%
+  rbind(r_squared_2back, r.squaredGLMM(lme1_def_2b)) %>%
+  rbind(r_squared_2back, r.squaredGLMM(lme1_som_2b))
+row.names(r_squared_2back) <- list_eff
+
+r_squared_0back
+r_squared_2back
+```
+
+- (4) plot - effect sizes bar plots
+```{r}
+df_plot = data.frame(network=rownames(r_squared_0back),
+                     r2m_0back=as.numeric(r_squared_0back[-1][,1]),
+                     r2m_2back=as.numeric(r_squared_2back[-1][,1]))
+
+# list_eff <- c("vis","lim","dor","ven","fro","def","som") # defined before
+plot_order_of_networks <- c("dor","ven","fro","lim","def","vis","som")
+
+# 0-back
+f1_0back <- ggplot(data=df_plot, aes(x = network, y = r2m_0back)) + 
+  geom_bar(stat = "identity", position = "dodge", color = "black", fill = "white") +
+  aes(x = factor(network, plot_order_of_networks), y = r2m_0back) +
+  labs(x = "Functional networks",
+       y = "Effect sizes") +
+  scale_y_continuous(expand = c(0,0), limits = c(0,0.6)) +
+  labs(title = "0-back") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 20), axis.text.x = element_text(angle = 90, hjust = 1), aspect.ratio = 1)
+f1_0back
+
+# 2-back
+f1_2back <- ggplot(data=df_plot, aes(x = network, y = r2m_2back)) + 
+  geom_bar(stat = "identity", position = "dodge", color = "black", fill = "white") +
+  aes(x = factor(network, plot_order_of_networks), y = r2m_2back) +
+  labs(x = "Functional networks",
+       y = "Effect sizes") +
+  scale_y_continuous(expand = c(0,0), limits = c(0,0.6)) +
+  labs(title = "2-back") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 20), axis.text.x = element_text(angle = 90, hjust = 1), aspect.ratio = 1)
+f1_2back
+```
+
+- (5) cohen.d
+```{r}
+# 0-back
+cohen.d(data_0back$dis[data_0back$network == "vis"], data_0back$dis[!(data_0back$network == "vis")]) # -0.7819427 (medium)
+cohen.d(data_0back$dis[data_0back$network == "lim"], data_0back$dis[!(data_0back$network == "lim")]) #  1.161041 (large)
+cohen.d(data_0back$dis[data_0back$network == "fro"], data_0back$dis[!(data_0back$network == "fro")]) #  0.1922416 (negligible)
+cohen.d(data_0back$dis[data_0back$network == "dor"], data_0back$dis[!(data_0back$network == "dor")]) # -0.1743875 (negligible)
+cohen.d(data_0back$dis[data_0back$network == "ven"], data_0back$dis[!(data_0back$network == "ven")]) #  0.2764237 (small)
+cohen.d(data_0back$dis[data_0back$network == "def"], data_0back$dis[!(data_0back$network == "def")]) #  0.4370847 (small)
+cohen.d(data_0back$dis[data_0back$network == "som"], data_0back$dis[!(data_0back$network == "som")]) #  0.4547063 (small)
+# 2-back
+cohen.d(data_2back$dis[data_2back$network == "vis"], data_2back$dis[!(data_2back$network == "vis")]) # -0.5052931 (medium)
+cohen.d(data_2back$dis[data_2back$network == "lim"], data_2back$dis[!(data_2back$network == "lim")]) #  1.417457 (large)
+cohen.d(data_2back$dis[data_2back$network == "fro"], data_2back$dis[!(data_2back$network == "fro")]) # -0.1085989 (negligible)
+cohen.d(data_2back$dis[data_2back$network == "dor"], data_2back$dis[!(data_2back$network == "dor")]) # -0.3534341 (small)
+cohen.d(data_2back$dis[data_2back$network == "ven"], data_2back$dis[!(data_2back$network == "ven")]) #  0.01807474 (negligible)
+cohen.d(data_2back$dis[data_2back$network == "def"], data_2back$dis[!(data_2back$network == "def")]) #  0.2594864 (small)
+cohen.d(data_2back$dis[data_2back$network == "som"], data_2back$dis[!(data_2back$network == "som")]) #  0.527744 (medium)
+```
+
+# part 5 - performance and total problem score
+- (1) data processing
+```{r}
+# for three way interactions
+# preprocess subj_list
+names(subj_list)[names(subj_list) == 'V1'] <- 'src_subject_id'
+subj_list$src_subject_id <- gsub("NDAR_", "", subj_list$src_subject_id)
+
+# merge dataframes
+nback_sub <- nback[,c("src_subject_id","tfmri_nb_all_beh_c0bpf_rate","tfmri_nb_all_beh_c0bnf_rate","tfmri_nb_all_beh_c0bngf_rate","tfmri_nb_all_beh_c2bpf_rate","tfmri_nb_all_beh_c2bnf_rate","tfmri_nb_all_beh_c2bngf_rate")]
+perf_psy <- merge(fam_site_id, nback_sub, by="src_subject_id")
+perf_psy <- merge(perf_psy, abcd_cbcl, by="src_subject_id")
+perf_psy <- merge(perf_psy, subj_list, by="src_subject_id")
+perf_psy <- perf_psy %>%
+  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","tfmri_nb_all_beh_c0bpf_rate","tfmri_nb_all_beh_c0bnf_rate","tfmri_nb_all_beh_c0bngf_rate","tfmri_nb_all_beh_c2bpf_rate","tfmri_nb_all_beh_c2bnf_rate","tfmri_nb_all_beh_c2bngf_rate"), as.numeric)
+# head(perf_psy)
+dim(perf_psy) # 5003   21
+
+# select subjects with clean imaging data
+perf_psy <- merge(data_hf_0b["src_subject_id"], perf_psy, by="src_subject_id")
+# head(perf_psy)
+dim(perf_psy) # 4952   21
+
+# pivot longer 
+perf_psy_long <- 
+  pivot_longer(perf_psy, cols = c("tfmri_nb_all_beh_c0bpf_rate","tfmri_nb_all_beh_c0bnf_rate","tfmri_nb_all_beh_c0bngf_rate","tfmri_nb_all_beh_c2bpf_rate","tfmri_nb_all_beh_c2bnf_rate","tfmri_nb_all_beh_c2bngf_rate"), names_to = "nback_condition", values_to = "nback_perf")
+
+# extract 0-back and 2-back & emotions 
+perf_psy_long$nback_condition <- gsub("tfmri_nb_all_beh_","",as.character(perf_psy_long$nback_condition))
+perf_psy_long$nback_condition <- gsub("_rate","",as.character(perf_psy_long$nback_condition))
+perf_psy_long$nback_condition <- gsub("b","_b",as.character(perf_psy_long$nback_condition))
+perf_psy_long <- perf_psy_long %>% separate(nback_condition,c("nback","emotion"))
+perf_psy_long <- perf_psy_long %>%
+  mutate_at(c("nback","emotion"), as.factor)
+# head(perf_psy_long)
+dim(perf_psy_long) # 30018    18
+```
+
+- (2) full mix model
+```{r}
+lmer6_acc_psych_threelevel <- lmer(nback_perf ~ cbcl_scr_syn_totprob_r * nback * emotion + sex + interview_age + (1|site_id_l/rel_family_id), data = perf_psy_long)
+summary(lmer6_acc_psych_threelevel)
+tab_model(lmer6_acc_psych_threelevel, digits = 4)
+```
+
+- (3) three-way anova
+```{r}
+anova_model1 <- aov(nback_perf ~ cbcl_scr_syn_totprob_r * nback * emotion, data = perf_psy_long)
+summary(anova_model1)
+tab_model(anova_model1)
+```
+
+- (4) plot
+```{r}
+# Create the scatter plot and add the regression line
+p <- ggplot(data = perf_psy_long, aes(x=cbcl_scr_syn_totprob_r, y=nback_perf, color=emotion, shape=emotion)) +
+  geom_point(aes(color=emotion),alpha = 0.5) +
+  facet_wrap(~nback) +
+  geom_smooth(method = "lm", se = TRUE, alpha = 0.1) +
+  scale_color_manual(values=c('#999999','#56B4E9','#E69F00')) +
+  labs(title = "", x = "CBCL total problems score", y = "Accuracy") +
+  theme_classic() +
+  theme(text = element_text(size = 20))
+p
+```
+
+# part 6 - demographics table
+- (1) preprocessing
+```{r}
+# demographic table includes 
+# (1) age
+# (2) sex assigned at birth; female (%)
+# (3) race/ethnicity (%)
+# (4) family income (%)
+# (5) caregiver education (%) 
+
+# select subjects with clean imaging data
+abcd_pdem <- merge(perf_psy["src_subject_id"], abcd_pdem, by="src_subject_id")
+abcd_pdem <- merge(abcd_pdem, fam_site_id, by="src_subject_id")
+abcd_pdem <- abcd_pdem %>%
+  mutate_at("interview_age", as.numeric) 
+
+# sanity check
+dim(abcd_pdem) # 4952   47
+# head(abcd_pdem)
+
+# re-code household income into three levels
+household.income = abcd_pdem$demo_comb_income_v2
+household.income[abcd_pdem$demo_comb_income_v2 == "1"] = 1 # "[<50K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "2"] = 1 # "[<50K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "3"] = 1 # "[<50K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "4"] = 1 # "[<50K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "5"] = 1 # "[<50K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "6"] = 1 # "[<50K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "7"] = 2 # "[>=50K & <100K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "8"] = 2 # "[>=50K & <100K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "9"] = 3 # "[>=100K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "10"] = 3 # "[>=100K]"
+household.income[abcd_pdem$demo_comb_income_v2 == "777"] = NA
+household.income[abcd_pdem$demo_comb_income_v2 == "999"] = NA
+household.income[household.income %in% c(NA, "999", "777")] = NA
+abcd_pdem$household.income = factor(household.income, levels= 1:3, labels = c("[<50K]", "[>=50K & <100K]", "[>=100K]") )
+
+# re-code caregiver education into five levels
+high.educ1 = abcd_pdem$demo_prnt_ed_v2
+high.educ2 = abcd_pdem$demo_prtnr_ed_v2
+high.educ1[which(high.educ1 == "999")] = NA
+high.educ2[which(high.educ2 == "999")] = NA
+high.educ1[which(high.educ1 == "777")] = NA
+high.educ2[which(high.educ2 == "777")] = NA
+high.educ = pmax(as.numeric(as.character(high.educ1)), as.numeric(as.character(high.educ2)), na.rm=T)
+idx <- which(high.educ %in% 0:12, arr.ind = TRUE)
+high.educ[idx] = 1 # "< HS Diploma"
+idx <- which(high.educ %in% 13:14, arr.ind = TRUE)
+high.educ[idx] = 2 # "HS Diploma/GED"
+idx <- which(high.educ %in% 15:17, arr.ind = TRUE)
+high.educ[idx] = 3 # "Some College"
+idx <- which(high.educ == 18, arr.ind = TRUE)
+high.educ[idx] = 4 # "Bachelor"
+idx <- which(high.educ %in% 19:21, arr.ind = TRUE)
+high.educ[idx] = 5 # "Post Graduate Degree"
+high.educ[which(high.educ == "999")]=NA
+high.educ[which(high.educ == "777")]=NA
+abcd_pdem$high.educ = factor(high.educ, levels= 1:5, labels = c("< HS Diploma","HS Diploma/GED","Some College","Bachelor","Post Graduate Degree") )
+
+# re-code racial categories with more easily identifiable variable names (into 8 levels)
+abcd_pdem$white= (abcd_pdem$demo_race_a_p___10 == 1)*1
+abcd_pdem$black= (abcd_pdem$demo_race_a_p___11 == 1)*1
+abcd_pdem$asian = 0
+abcd_pdem$asian[abcd_pdem$demo_race_a_p___18 == 1 | abcd_pdem$demo_race_a_p___19 == 1 | 
+                abcd_pdem$demo_race_a_p___20 == 1 | abcd_pdem$demo_race_a_p___21 == 1 | 
+                abcd_pdem$demo_race_a_p___22 == 1 | abcd_pdem$demo_race_a_p___23 == 1 |
+                abcd_pdem$demo_race_a_p___24==1] = 1
+abcd_pdem$aian = 0
+abcd_pdem$aian[abcd_pdem$demo_race_a_p___12 == 1 | abcd_pdem$demo_race_a_p___13 == 1] = 1
+abcd_pdem$nhpi = 0
+abcd_pdem$nhpi[abcd_pdem$demo_race_a_p___14 == 1 | abcd_pdem$demo_race_a_p___15 == 1 | 
+               abcd_pdem$demo_race_a_p___16 == 1 | abcd_pdem$demo_race_a_p___17 == 1] = 1
+abcd_pdem$other = 0
+abcd_pdem$other[abcd_pdem$demo_race_a_p___25 == 1] = 1
+
+# generate mixed category
+abcd_pdem$mixed = 
+  abcd_pdem$white + abcd_pdem$black + abcd_pdem$asian + abcd_pdem$aian + abcd_pdem$nhpi + abcd_pdem$other
+abcd_pdem$mixed[abcd_pdem$mixed <= 1] =  0
+abcd_pdem$mixed[abcd_pdem$mixed > 1]  =  1
+
+# generate single race.ethnicity variable 
+# note: If you want fewer categories, change code here so that different categories (e.g., other, mixed) have same value (e.g., both = 7)
+abcd_pdem$race.eth = NA
+abcd_pdem$race.eth[abcd_pdem$demo_ethn_v2 == 1] = 1 
+abcd_pdem$race.eth[abcd_pdem$white == 1] = 2
+abcd_pdem$race.eth[abcd_pdem$black == 1] = 3
+abcd_pdem$race.eth[abcd_pdem$asian == 1] = 4
+abcd_pdem$race.eth[abcd_pdem$aian  == 1] = 5
+abcd_pdem$race.eth[abcd_pdem$nhpi  == 1] = 6
+abcd_pdem$race.eth[abcd_pdem$other == 1] = 7
+abcd_pdem$race.eth[abcd_pdem$mixed == 1] = 8
+abcd_pdem$race.eth <- factor(abcd_pdem$race.eth, levels = 1:8, 
+                             labels = c("Hispanic", "White", "Black", "Asian", "AIAN", "NHPI", "Other", "Mixed"))
+# head(abcd_pdem)
+```
+
+- (2) generate the table
+```{r}
+# create a summary/demographics table
+vars1 <- c("interview_age", "sex", "race.eth", "high.educ", "household.income")
+tab1 <- CreateTableOne(vars = vars1, data = abcd_pdem)
+tabAsStringMatrix <- print(tab1, printToggle = FALSE, noSpaces = TRUE)
+tab1 = knitr::kable(tabAsStringMatrix)
+tab1
+```
+
+# part 7 - mediation
+- (1) mediation analysis - all three emotional comparisons
+```{r}
+library(mediation)
+detach("package:lmerTest", unload = TRUE) # must unload lmerTest to run mediation
+# detach("package:psych", unload = TRUE) # also be sure psych is detached
+
+# using average accuracy of all faces
+# IV - acc, DV - psy, med - sqED
+### 0-back ###
+# vis
+lme4_0back_vis.0 <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_0b_rate + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "vis",])
+lme4_0back_vis.M <- 
+  lmer(dis ~ allface_0b_rate + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "vis",])
+lme4_0back_vis.Y <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_0b_rate + dis + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "vis",])
+lme4_med_0back_vis <- 
+  mediate(model.m = lme4_0back_vis.M, model.y = lme4_0back_vis.Y, treat='allface_0b_rate', mediator = 'dis', data=data_0back[data_0back$network == "vis",], sims=1000, dropobs=TRUE)
+
+summary(lme4_0back_vis.0)
+summary(lme4_0back_vis.M)
+summary(lme4_0back_vis.Y)
+summary(lme4_med_0back_vis) # ACME            -0.65252     -1.11414        -0.17   0.006 **
+
+# lim
+lme4_0back_lim.0 <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_0b_rate + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "lim",])
+lme4_0back_lim.M <- 
+  lmer(dis ~ allface_0b_rate + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "lim",])
+lme4_0back_lim.Y <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_0b_rate + dis + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "lim",])
+lme4_med_0back_lim <- 
+  mediate(model.m = lme4_0back_lim.M, model.y = lme4_0back_lim.Y, treat='allface_0b_rate', mediator = 'dis', data=data_0back[data_0back$network == "lim",], sims=1000, dropobs=TRUE)
+
+summary(lme4_0back_lim.0)
+summary(lme4_0back_lim.M)
+summary(lme4_0back_lim.Y)
+summary(lme4_med_0back_lim) # ACME            -0.08545     -0.26251         0.06    0.26   
+
+# v1
+lme4_0back_v1.0 <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_0b_rate + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "v1",])
+lme4_0back_v1.M <- 
+  lmer(dis ~ allface_0b_rate + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "v1",])
+lme4_0back_v1.Y <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_0b_rate + dis + sex + interview_age + (1|site_id_l), data = data_0back[data_0back$network == "v1",])
+lme4_med_0back_v1 <- 
+  mediate(model.m = lme4_0back_v1.M, model.y = lme4_0back_v1.Y, treat='allface_0b_rate', mediator = 'dis', data=data_0back[data_0back$network == "v1",], sims=1000, dropobs=TRUE)
+
+summary(lme4_0back_v1.0)
+summary(lme4_0back_v1.M)
+summary(lme4_0back_v1.Y)
+summary(lme4_med_0back_v1) # ACME            -0.6463      -1.0603        -0.27  <2e-16 ***
+
+## 2-back ###
+# vis
+lme4_2back_vis.0 <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_2b_rate + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "vis",])
+lme4_2back_vis.M <- 
+  lmer(dis ~ allface_2b_rate + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "vis",])
+lme4_2back_vis.Y <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_2b_rate + dis + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "vis",])
+lme4_med_2back_vis <- 
+  mediate(model.m = lme4_2back_vis.M, model.y = lme4_2back_vis.Y, treat='allface_2b_rate', mediator = 'dis', data=data_2back[data_2back$network == "vis",], sims=1000, dropobs=TRUE)
+
+summary(lme4_2back_vis.0)
+summary(lme4_2back_vis.M)
+summary(lme4_2back_vis.Y)
+summary(lme4_med_2back_vis) # ACME            -1.1415      -1.6326        -0.66  <2e-16 ***
+
+# lim
+lme4_2back_lim.0 <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_2b_rate + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "lim",])
+lme4_2back_lim.M <- 
+  lmer(dis ~ allface_2b_rate + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "lim",])
+lme4_2back_lim.Y <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_2b_rate + dis + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "lim",])
+lme4_med_2back_lim <- 
+  mediate(model.m = lme4_2back_lim.M, model.y = lme4_2back_lim.Y, treat='allface_2b_rate', mediator = 'dis', data=data_2back[data_2back$network == "lim",], sims=1000, dropobs=TRUE)
+
+summary(lme4_2back_lim.0)
+summary(lme4_2back_lim.M)
+summary(lme4_2back_lim.Y)
+summary(lme4_med_2back_lim) # ACME            -0.5729      -0.9724        -0.20  <2e-16 ***
+
+# v1
+lme4_2back_v1.0 <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_2b_rate + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "v1",])
+lme4_2back_v1.M <- 
+  lmer(dis ~ allface_2b_rate + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "v1",])
+lme4_2back_v1.Y <- 
+  lmer(cbcl_scr_syn_totprob_r ~ allface_2b_rate + dis + sex + interview_age + (1|site_id_l), data = data_2back[data_2back$network == "v1",])
+lme4_med_2back_v1 <- 
+  mediate(model.m = lme4_2back_v1.M, model.y = lme4_2back_v1.Y, treat='allface_2b_rate', mediator = 'dis', data=data_2back[data_2back$network == "v1",], sims=1000, dropobs=TRUE)
+
+summary(lme4_2back_v1.0)
+summary(lme4_2back_v1.M)
+summary(lme4_2back_v1.Y)
+summary(lme4_med_2back_v1) # ACME            -0.47589     -0.77228        -0.19   0.002 ** 
+```
