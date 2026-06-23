@@ -13,8 +13,9 @@ date: "2025-11-25"
  - part 6 - demographic table
  - part 7 - mediation
  
-note: Pearson correlations calculated by python RSAtoolbox package
+note: Pearson correlations was calculated by python RSAtoolbox package
 
+last update on: 2026-04-24
 author: Yen-Chu Lin
 
 # part 1 - general setup
@@ -30,6 +31,7 @@ library(effsize) # for cohen.d
 library(tableone)
 library(vtable)
 library(summarytools)
+library(MatchIt)
 ```
 
 - (2) functions
@@ -121,7 +123,11 @@ cbcl_col_select <-
     "cbcl_scr_syn_attention_t","cbcl_scr_syn_attention_r",
     "cbcl_scr_syn_external_t","cbcl_scr_syn_external_r",
     "cbcl_scr_syn_internal_t","cbcl_scr_syn_internal_r",
-    "cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r"
+    "cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r",
+    "cbcl_scr_syn_anxdep_r","cbcl_scr_syn_withdep_r",
+    "cbcl_scr_syn_somatic_r","cbcl_scr_syn_social_r",
+    "cbcl_scr_syn_thought_r","cbcl_scr_syn_rulebreak_r",
+    "cbcl_scr_syn_aggressive_r"
     )
 
 # N-back behavioral data (accuracy)
@@ -210,6 +216,18 @@ abcd_pdem <- read.delim(paste(abcd_file_path, pdemo_filename, sep=""), header = 
 abcd_pdem <- abcd_pdem[pdemo_col_select] %>% na.omit()
 abcd_pdem$subjectkey <- gsub("NDAR_", "", abcd_pdem$subjectkey)
 names(abcd_pdem)[names(abcd_pdem) == 'subjectkey'] <- 'src_subject_id'
+
+# time 3 (year 3 follow-up) CBCL scores
+abcd_cbcl_3year <- read.delim(paste(abcd_file_path, cbcl_filename, sep=""), header = TRUE) %>% 
+  filter(eventname == "3_year_follow_up_y_arm_1") %>%
+  select(all_of(c("src_subject_id","cbcl_scr_syn_totprob_r")))
+abcd_cbcl_3year$src_subject_id <- gsub("NDAR_", "", abcd_cbcl_3year$src_subject_id)
+abcd_cbcl_3year$cbcl_scr_syn_totprob_r <- as.numeric(abcd_cbcl_3year$cbcl_scr_syn_totprob_r)
+# rename the columns
+names(abcd_cbcl_3year)[names(abcd_cbcl_3year) == 'cbcl_scr_syn_totprob_r'] <- 'cbcl_scr_syn_totprob_r_3year' 
+# check for completeness
+abcd_cbcl_3year_totprob_r <- abcd_cbcl_3year[complete.cases(abcd_cbcl_3year$cbcl_scr_syn_totprob_r_3year), ] 
+dim(abcd_cbcl_3year_totprob_r) # 6133    2
 ```
 
 - (5) preprocess dataframes
@@ -295,17 +313,29 @@ data_fn0b_long <-
 data_0back <- rbind(data_hf0b_long, data_hn0b_long, data_fn0b_long)
 
 # (6) make age and CBCL scores numeric
+cbcl_col_numeric <- 
+    c("interview_age",
+    "cbcl_scr_dsm5_adhd_t","cbcl_scr_dsm5_adhd_r",
+    "cbcl_scr_syn_attention_t","cbcl_scr_syn_attention_r",
+    "cbcl_scr_syn_external_t","cbcl_scr_syn_external_r",
+    "cbcl_scr_syn_internal_t","cbcl_scr_syn_internal_r",
+    "cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r",
+    "cbcl_scr_syn_anxdep_r","cbcl_scr_syn_withdep_r",
+    "cbcl_scr_syn_somatic_r","cbcl_scr_syn_social_r",
+    "cbcl_scr_syn_thought_r","cbcl_scr_syn_rulebreak_r",
+    "cbcl_scr_syn_aggressive_r"
+    )
 data_hf0b_long <- data_hf0b_long %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric) 
 data_hn0b_long <- data_hn0b_long %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric) 
 data_fn0b_long <- data_fn0b_long %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric) 
 data_0back <- data_0back %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric)
 
 ### 2-back ###
@@ -338,20 +368,20 @@ data_2back <- rbind(data_hf2b_long, data_hn2b_long, data_fn2b_long)
 
 # (6) make age and CBCL scores numeric
 data_hf2b_long <- data_hf2b_long %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric) 
 data_hn2b_long <- data_hn2b_long %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric) 
 data_fn2b_long <- data_fn2b_long %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric) 
 data_2back <- data_2back %>%
-  mutate_at(c("interview_age","cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r","cbcl_scr_syn_external_r","cbcl_scr_syn_external_t","cbcl_scr_syn_internal_r","cbcl_scr_syn_internal_t"), as.numeric) %>%
+  mutate_at(cbcl_col_numeric, as.numeric) %>%
   mutate_at(nback_col_select[-1], as.numeric)
 ```
 
-- (2) mixed model - dis vs. cbcl
+- (2) mixed model - dissimilarity vs. cbcl
 one model per network
 ```{r}
 vector_to_factor <- function(data_long) {
@@ -433,16 +463,221 @@ lme2_2back_v1_ext <- lmer(cbcl_scr_syn_external_r ~ dis * condition + sex + inte
 summary(lme2_2back_v1_ext) # 1.01e-05 *** ; no interactions
 ```
 
+additional models for CBCL sub-scales
+### anxiety/depression score ###
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_anxdep <- lmer(cbcl_scr_syn_anxdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_anxdep) # 0.9227 ; no interactions
+# vis
+lme2_0back_vis_anxdep <- lmer(cbcl_scr_syn_anxdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_anxdep) # 0.1643 ; no interactions
+# v1
+lme2_0back_v1_anxdep <- lmer(cbcl_scr_syn_anxdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_anxdep) # 0.8706 ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_anxdep <- lmer(cbcl_scr_syn_anxdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_anxdep) # 0.5283 ; no interactions
+# vis
+lme2_2back_vis_anxdep <- lmer(cbcl_scr_syn_anxdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_anxdep) # 0.6005 ; no interactions
+# v1
+lme2_2back_v1_anxdep <- lmer(cbcl_scr_syn_anxdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_anxdep) # 0.7857 ; no interactions
+```
+
+### withdrawn/depression score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_withdep <- lmer(cbcl_scr_syn_withdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_withdep) # 0.37028 ; no interactions
+# vis
+lme2_0back_vis_withdep <- lmer(cbcl_scr_syn_withdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_withdep) # 0.00141 ** ; no interactions
+# v1
+lme2_0back_v1_withdep <- lmer(cbcl_scr_syn_withdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_withdep) # 0.02769 *; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_withdep <- lmer(cbcl_scr_syn_withdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_withdep) # 0.39684 ; no interactions
+# vis
+lme2_2back_vis_withdep <- lmer(cbcl_scr_syn_withdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_withdep) # 0.64523 ; no interactions
+# v1
+lme2_2back_v1_withdep <- lmer(cbcl_scr_syn_withdep_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_withdep) # 0.63588 ; no interactions
+```
+
+### somatic complaints score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_somatic <- lmer(cbcl_scr_syn_somatic_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_somatic) # 0.899 ; no interactions
+# vis
+lme2_0back_vis_somatic <- lmer(cbcl_scr_syn_somatic_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_somatic) # 0.206 ; no interactions
+# v1
+lme2_0back_v1_somatic <- lmer(cbcl_scr_syn_somatic_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_somatic) # 0.985 ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_somatic <- lmer(cbcl_scr_syn_somatic_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_somatic) # 0.977 ; no interactions
+# vis
+lme2_2back_vis_somatic <- lmer(cbcl_scr_syn_somatic_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_somatic) # 0.157 ; no interactions
+# v1
+lme2_2back_v1_somatic <- lmer(cbcl_scr_syn_somatic_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_somatic) # 0.722 ; no interactions
+```
+
+### rule-breaking behavior score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_rulebreak <- lmer(cbcl_scr_syn_rulebreak_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_rulebreak) # 0.646 ; no interactions
+# vis
+lme2_0back_vis_rulebreak <- lmer(cbcl_scr_syn_rulebreak_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_rulebreak) # 0.160 ; no interactions
+# v1
+lme2_0back_v1_rulebreak <- lmer(cbcl_scr_syn_rulebreak_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_rulebreak) # 0.523 ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_rulebreak <- lmer(cbcl_scr_syn_rulebreak_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_rulebreak) # 0.374 ; no interactions
+# vis
+lme2_2back_vis_rulebreak <- lmer(cbcl_scr_syn_rulebreak_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_rulebreak) # 0.0691 ; no interactions
+# v1
+lme2_2back_v1_rulebreak <- lmer(cbcl_scr_syn_rulebreak_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_rulebreak) # 0.0189 * ; no interactions
+```
+
+### aggressive behavior score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_aggressive <- lmer(cbcl_scr_syn_aggressive_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_aggressive) # 0.20935 ; no interactions
+# vis
+lme2_0back_vis_aggressive <- lmer(cbcl_scr_syn_aggressive_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_aggressive) # 0.01586 * ; no interactions
+# v1
+lme2_0back_v1_aggressive <- lmer(cbcl_scr_syn_aggressive_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_aggressive) # 0.00101 ** ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_aggressive <- lmer(cbcl_scr_syn_aggressive_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_aggressive) # 0.68314 ; no interactions
+# vis
+lme2_2back_vis_aggressive <- lmer(cbcl_scr_syn_aggressive_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_aggressive) # 0.000485 *** ; no interactions
+# v1
+lme2_2back_v1_aggressive <- lmer(cbcl_scr_syn_aggressive_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_aggressive) # 1.73e-06 *** ; no interactions
+```
+
+### social problems score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_social <- lmer(cbcl_scr_syn_social_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_social) # 0.168 ; no interactions
+# vis
+lme2_0back_vis_social <- lmer(cbcl_scr_syn_social_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_social) # 0.0688 ; no interactions
+# v1
+lme2_0back_v1_social <- lmer(cbcl_scr_syn_social_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_social) # 0.00103 ** ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_social <- lmer(cbcl_scr_syn_social_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_social) # 0.288 ; no interactions
+# vis
+lme2_2back_vis_social <- lmer(cbcl_scr_syn_social_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_social) # 3.32e-05 *** ; no interactions
+# v1
+lme2_2back_v1_social <- lmer(cbcl_scr_syn_social_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_social) # 4.57e-05 *** ; no interactions
+```
+
+### thought problems score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_thought <- lmer(cbcl_scr_syn_thought_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_thought) # 0.70670 ; no interactions
+# vis
+lme2_0back_vis_thought <- lmer(cbcl_scr_syn_thought_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_thought) # 0.576680 ; no interactions
+# v1
+lme2_0back_v1_thought <- lmer(cbcl_scr_syn_thought_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_thought) # 0.043311 * ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_thought <- lmer(cbcl_scr_syn_thought_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_thought) # 0.524190 ; no interactions
+# vis
+lme2_2back_vis_thought <- lmer(cbcl_scr_syn_thought_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_thought) # 0.00191 ** ; no interactions
+# v1
+lme2_2back_v1_thought <- lmer(cbcl_scr_syn_thought_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_thought) # 0.00732 ** ; no interactions
+```
+
+### attention problems score ### 
+```{r}
+## 0-back ##
+# lim
+lme2_0back_lim_attention <- lmer(cbcl_scr_syn_attention_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lme2_0back_lim_attention) # 0.87337 ; no interactions
+# vis
+lme2_0back_vis_attention <- lmer(cbcl_scr_syn_attention_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lme2_0back_vis_attention) # 0.1514 ; no interactions
+# v1
+lme2_0back_v1_attention <- lmer(cbcl_scr_syn_attention_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lme2_0back_v1_attention) # 0.000538 *** ; no interactions
+
+## 2-back ##
+# lim
+lme2_2back_lim_attention <- lmer(cbcl_scr_syn_attention_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lme2_2back_lim_attention) # 0.2165 ; no interactions
+# vis
+lme2_2back_vis_attention <- lmer(cbcl_scr_syn_attention_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lme2_2back_vis_attention) # 4.2e-05 *** ; no interactions
+# v1
+lme2_2back_v1_attention <- lmer(cbcl_scr_syn_attention_r ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lme2_2back_v1_attention) # 0.000116 *** ; no interactions
+```
+
 - (3) plot - dissimilarity vs. cbcl
 (3.1) cbcl score distributions
 ```{r}
 # preprocess dataset
 cbcl_col_list <- 
     c(
-      "cbcl_scr_syn_attention_t","cbcl_scr_syn_attention_r",
-      "cbcl_scr_syn_external_t","cbcl_scr_syn_external_r",
-      "cbcl_scr_syn_internal_t","cbcl_scr_syn_internal_r",
-      "cbcl_scr_syn_totprob_t","cbcl_scr_syn_totprob_r"
+    "cbcl_scr_syn_attention_t", "cbcl_scr_syn_attention_r",
+    "cbcl_scr_syn_external_t",  "cbcl_scr_syn_external_r",
+    "cbcl_scr_syn_internal_t",  "cbcl_scr_syn_internal_r",
+    "cbcl_scr_syn_totprob_t",   "cbcl_scr_syn_totprob_r",
+    "cbcl_scr_syn_anxdep_r","cbcl_scr_syn_withdep_r",
+    "cbcl_scr_syn_somatic_r","cbcl_scr_syn_social_r",
+    "cbcl_scr_syn_thought_r","cbcl_scr_syn_rulebreak_r",
+    "cbcl_scr_syn_aggressive_r"
     )
 data_cbcl <- data_hf0b %>%
   mutate_at(cbcl_col_list, as.numeric)
@@ -527,6 +762,96 @@ f1_int_t
 
 # head(data_0back)
 ```
+
+```{r}
+f1_anxdep_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_anxdep_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,2000)) +
+  labs(x = "anxious/depressed raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_anxdep_r
+```
+
+```{r}
+f1_withdep_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_withdep_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,3000)) +
+  labs(x = "withdrawn/depressed raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_withdep_r
+```
+
+```{r}
+f1_somatic_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_somatic_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,2500)) +
+  labs(x = "somatic complaints raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_somatic_r
+```
+
+```{r}
+f1_social_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_social_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,3000)) +
+  labs(x = "social problems raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_social_r
+```
+
+```{r}
+f1_thought_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_thought_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,2500)) +
+  labs(x = "thought problems raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_thought_r
+```
+
+```{r}
+f1_rulebreak_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_rulebreak_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,3000)) +
+  labs(x = "rule-breaking behavior raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_rulebreak_r
+```
+
+```{r}
+f1_aggressive_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_aggressive_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+#  scale_x_continuous(expand = c(0,0), limits = c(20,95)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,2000)) +
+  labs(x = "aggressive behavior raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+f1_aggressive_r
+```
+
+```{r}
+f1_attention_r <- ggplot(data_cbcl, aes(x=cbcl_scr_syn_attention_r)) + 
+  geom_histogram(binwidth=1, color = "black", fill = "white") +
+  #scale_x_continuous(expand = c(0,0), limits = c(-1,21)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,2000)) +
+  labs(x = "attention problems raw score",
+       y = "number of subjects") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), text = element_text(size = 18), aspect.ratio = 1)
+
+f1_attention_r
+```
+
 
 (3.2) subjects with both ext and int problems (check overlaps)
 ```{r}
@@ -616,7 +941,7 @@ f2_2back_lim_tol
 f2_2back_v1_tol
 ```
 
-(3.4) internalizing score plot
+(3.4) internalizating score plot
 ```{r}
 # cbcl_scr_syn_internal_r
 ### 0-back ###
@@ -696,7 +1021,7 @@ f2_2back_lim_int
 f2_2back_v1_int
 ```
 
-(3.5) externalizing score plot
+(3.5) externalizating score plot
 ```{r}
 # cbcl_scr_syn_external_r
 ### 0-back ###
@@ -774,6 +1099,170 @@ f2_0back_v1_ext
 f2_2back_vis_ext
 f2_2back_lim_ext
 f2_2back_v1_ext
+```
+
+- (4) predicting CBCL scores
+process dataframes
+```{r}
+# create a data frame for CBCL prediction
+data_0back_3y_cbcl <- merge(data_0back, abcd_cbcl_3year_totprob_r, by="src_subject_id")
+data_2back_3y_cbcl <- merge(data_2back, abcd_cbcl_3year_totprob_r, by="src_subject_id")
+
+# keep complete data
+data_0back_3y_cbcl <- data_0back_3y_cbcl[!is.na(data_0back_3y_cbcl$cbcl_scr_syn_totprob_r_3year),]
+data_2back_3y_cbcl <- data_2back_3y_cbcl[!is.na(data_2back_3y_cbcl$cbcl_scr_syn_totprob_r_3year),]
+
+# sanity check
+dim(data_0back_3y_cbcl) # 94032    27
+dim(data_2back_3y_cbcl) # 94032    27
+head(data_0back_3y_cbcl)
+head(data_2back_3y_cbcl)
+```
+
+mixed models - dissimilarity vs. future cbcl
+```{r}
+### future total problem score ### 
+## 0-back ##
+# vis
+lme2_0back_vis_tol_3yr <- lmer(cbcl_scr_syn_totprob_r_3year ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back_3y_cbcl[data_0back_3y_cbcl$network == "vis",])
+summary(lme2_0back_vis_tol_3yr) # 0.4407 ; no interactions
+# lim
+lme2_0back_lim_tol_3yr <- lmer(cbcl_scr_syn_totprob_r_3year ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back_3y_cbcl[data_0back_3y_cbcl$network == "lim",])
+summary(lme2_0back_lim_tol_3yr) # 0.9499 ; no interactions
+# v1
+lme2_0back_v1_tol_3yr <- lmer(cbcl_scr_syn_totprob_r_3year ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back_3y_cbcl[data_0back_3y_cbcl$network == "v1",])
+summary(lme2_0back_v1_tol_3yr) # 0.000457 *** ; no interactions
+
+## 2-back ##
+# vis
+lme2_2back_vis_tol_3yr <- lmer(cbcl_scr_syn_totprob_r_3year ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back_3y_cbcl[data_2back_3y_cbcl$network == "vis",])
+summary(lme2_2back_vis_tol_3yr) # 0.000525 *** ; no interactions
+# lim
+lme2_2back_lim_tol_3yr <- lmer(cbcl_scr_syn_totprob_r_3year ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back_3y_cbcl[data_2back_3y_cbcl$network == "lim",])
+summary(lme2_2back_lim_tol_3yr) # 0.8226 ; no interactions
+# v1
+lme2_2back_v1_tol_3yr <- lmer(cbcl_scr_syn_totprob_r_3year ~ dis * condition + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back_3y_cbcl[data_2back_3y_cbcl$network == "v1",])
+summary(lme2_2back_v1_tol_3yr) # 1.04e-06 *** ; no interactions
+```
+
+- (5) group analysis (using > 63 as the clinical threshold)
+process dataset
+```{r}
+# group match with age, sex, & site id
+low_score = 50
+cut_off_score = 63
+
+### for 0-back ###
+# subsetting data
+data_0back_cbclgroup <- data_0back[(data_0back$network == "vis" & data_0back$condition == "hf"),]
+
+# check number of subjects
+sum(data_0back_cbclgroup$cbcl_scr_syn_totprob_t <= low_score) # 3573
+sum(data_0back_cbclgroup$cbcl_scr_syn_totprob_t > cut_off_score) # 264
+
+# add a column to label the cbcl group (0 - low, 1 - high)
+data_0back_cbclgroup$cbcl_group_clinical <- 
+  ifelse(data_0back_cbclgroup$cbcl_scr_syn_totprob_t <= low_score, 0, # is less than or equals to low_score, set as 0
+         ifelse(data_0back_cbclgroup$cbcl_scr_syn_totprob_t > cut_off_score, 1, NA)) # is equals to or more than cut_off_score, set as 1; NA otherwise
+
+# data cleaning 
+# save the subset data of only low and high groups
+data_0back_cbclgroup <- data_0back_cbclgroup[!is.na(data_0back_cbclgroup$cbcl_group_clinical),]
+data_0back_cbclgroup$site_id_l <- as.character(data_0back_cbclgroup$site_id_l)
+
+# data matching
+matchit_model <- matchit(
+  cbcl_group_clinical ~ interview_age + sex + site_id_l,
+  data = data_0back_cbclgroup,
+  method = "nearest",      # nearest neighbor matching
+  distance = "logit",      # propensity score via logistic regression
+  ratio = 1,               # 1:1 matching
+  replace = FALSE          # without replacement
+)
+summary(matchit_model)
+
+# get matched dataframe
+df_match_0back <- match_data(matchit_model,
+                      data = data_0back_cbclgroup,
+                      distance = "prop.score")
+
+# get the list of the subject ids
+matched_subject_id <- df_match_0back$src_subject_id
+
+# get the matched data
+data_0back_matched <- data_0back[data_0back$src_subject_id %in% matched_subject_id,]
+data_2back_matched <- data_2back[data_2back$src_subject_id %in% matched_subject_id,]
+
+# add a column to label the cbcl group (0 - low, 1 - high)
+data_0back_matched$cbcl_group_clinical <- 
+  ifelse(data_0back_matched$cbcl_scr_syn_totprob_t <= low_score, 0,
+         ifelse(data_0back_matched$cbcl_scr_syn_totprob_t > cut_off_score, 1, NA))
+data_2back_matched$cbcl_group_clinical <- 
+  ifelse(data_2back_matched$cbcl_scr_syn_totprob_t <= low_score, 0,
+         ifelse(data_2back_matched$cbcl_scr_syn_totprob_t > cut_off_score, 1, NA))
+
+# sanity check
+dim(data_0back_matched) # 12672    27 (264*2*8*3
+dim(data_2back_matched) # 12672    27
+head(data_0back_matched)
+head(data_2back_matched)
+```
+
+compare dissimilarities between groups
+```{r}
+# t-tests
+# t-test of all dissimilarities (all emotion comparisons)
+### 0-back ###
+ttest_vis_0b <- t.test(dis ~ cbcl_group_clinical, data = data_0back_matched[data_0back_matched$network == "vis",])
+ttest_lim_0b <- t.test(dis ~ cbcl_group_clinical, data = data_0back_matched[data_0back_matched$network == "lim",])
+ttest_v1_0b  <- t.test(dis ~ cbcl_group_clinical, data = data_0back_matched[data_0back_matched$network == "v1",])
+
+ttest_vis_0b # 0.001511
+ttest_lim_0b # 0.05925
+ttest_v1_0b  # 0.004075
+
+### 2-back ###
+ttest_vis_2b <- t.test(dis ~ cbcl_group_clinical, data = data_2back_matched[data_2back_matched$network == "vis",])
+ttest_lim_2b <- t.test(dis ~ cbcl_group_clinical, data = data_2back_matched[data_2back_matched$network == "lim",])
+ttest_v1_2b  <- t.test(dis ~ cbcl_group_clinical, data = data_2back_matched[data_2back_matched$network == "v1",])
+
+ttest_vis_2b # 3.222e-06
+ttest_lim_2b # 0.0005018
+ttest_v1_2b  # 0.004273
+
+# ttest_vis_2b$statistic
+# ttest_vis_2b$p.value
+
+# effect sizes
+### 0-back ###
+# a function to get a sub-dataframe for low group
+func_low_group_0b <- function(network_name) {
+  group1 <- data_0back_matched[(data_0back_matched$network == network_name & data_0back_matched$cbcl_group_clinical == 0),]
+  return(group1$dis)
+}
+# a function to get a sub-dataframe for high group
+func_high_group_0b <- function(network_name) {
+  group2 <- data_0back_matched[(data_0back_matched$network == network_name & data_0back_matched$cbcl_group_clinical == 1),]
+  return(group2$dis)
+}
+cohen.d(func_low_group_0b("vis"), func_high_group_0b("vis")) # -0.1597133 (negligible)
+cohen.d(func_low_group_0b("lim"), func_high_group_0b("lim")) # -0.09485952 (negligible)
+cohen.d(func_low_group_0b("v1"),  func_high_group_0b("v1"))  # -0.1445535 (negligible)
+
+### 2-back ###
+# a function to get a sub-dataframe for low group
+func_low_group_2b <- function(network_name) {
+  group1 <- data_2back_matched[(data_2back_matched$network == network_name & data_2back_matched$cbcl_group_clinical == 0),]
+  return(group1$dis)
+}
+# a function to get a sub-dataframe for high group
+func_high_group_2b <- function(network_name) {
+  group2 <- data_2back_matched[(data_2back_matched$network == network_name & data_2back_matched$cbcl_group_clinical == 1),]
+  return(group2$dis)
+}
+cohen.d(func_low_group_2b("vis"), func_high_group_2b("vis")) # -0.2348411 (small)
+cohen.d(func_low_group_2b("lim"), func_high_group_2b("lim")) # -0.1752295 (negligible)
+cohen.d(func_low_group_2b("v1"),  func_high_group_2b("v1"))  # -0.1438009 (negligible)
 ```
 
 # part 3 - dissimilarity and performance
@@ -895,6 +1384,36 @@ f3_0back_v1
 f3_2back_vis
 f3_2back_lim
 f3_2back_v1
+```
+
+- (4) mixed models with three levels of emotion comparisons
+```{r}
+###### controlled for overall performance ######
+## 0-back ##
+# vis #
+lmer3_0back_vis <- lmer(allface_0b_rate ~ dis * condition + tfmri_nb_all_beh_c0b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "vis",])
+summary(lmer3_0back_vis) # 0.7076
+
+# lim #
+lmer3_0back_lim <- lmer(allface_0b_rate ~ dis * condition + tfmri_nb_all_beh_c0b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "lim",])
+summary(lmer3_0back_lim) # 0.1559
+
+# v1
+lmer3_0back_v1 <- lmer(allface_0b_rate ~ dis * condition + tfmri_nb_all_beh_c0b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_0back[data_0back$network == "v1",])
+summary(lmer3_0back_v1) # 0.4662
+
+## 2-back ##
+# vis #
+lmer3_2back_vis <- lmer(allface_2b_rate ~ dis * condition + tfmri_nb_all_beh_c2b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "vis",])
+summary(lmer3_2back_vis) # 0.019417 *
+
+# lim
+lmer3_2back_lim <- lmer(allface_2b_rate ~ dis * condition + tfmri_nb_all_beh_c2b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "lim",])
+summary(lmer3_2back_lim) # 0.0878 .
+
+# v1
+lmer3_2back_v1 <- lmer(allface_2b_rate ~ dis * condition + tfmri_nb_all_beh_c2b_rate + sex + interview_age + (1|site_id_l/rel_family_id), data = data_2back[data_2back$network == "v1",])
+summary(lmer3_2back_v1) # 0.157
 ```
 
 # part 4 - effect sizes
